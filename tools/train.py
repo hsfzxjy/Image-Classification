@@ -36,6 +36,7 @@ from utils.utils import get_optimizer
 from utils.utils import save_checkpoint
 from utils.utils import create_logger
 
+from parallel.data_parallel import DataParallelModel
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train classification network')
@@ -103,7 +104,7 @@ def main():
     }
 
     gpus = list(config.GPUS)
-    model = torch.nn.DataParallel(model, device_ids=gpus).cuda()
+    model = DataParallelModel(model, device_ids=gpus, gather_=True).cuda()
 
     # define loss function (criterion) and optimizer
     criterion = torch.nn.CrossEntropyLoss().cuda()
@@ -140,7 +141,7 @@ def main():
     # Data loading code
     traindir = os.path.join(config.DATASET.ROOT, config.DATASET.TRAIN_SET)
     valdir = os.path.join(config.DATASET.ROOT, config.DATASET.TEST_SET)
-
+    print(config.DATASET.ROOT)
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
@@ -173,7 +174,6 @@ def main():
         num_workers=config.WORKERS,
         pin_memory=True
     )
-
     for epoch in range(last_epoch, config.TRAIN.END_EPOCH):
         lr_scheduler.step()
         # train for one epoch

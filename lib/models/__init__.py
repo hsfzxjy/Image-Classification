@@ -9,3 +9,5 @@ from __future__ import division
 from __future__ import print_function
 
 import models.cls_hrnet
+from models import shared_resnet as cls_basic_shared_resnet101
+from models import shared_hrnet as cls_basic_shared_hrnet
