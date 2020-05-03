@@ -53,47 +53,49 @@ class SharedResNet(nn.Module):
         self.backend = backend
         self.bn_type = bn_type
 
-        conv_builder = SharedConvBuilder(backend, ParameterManager(self))
+        self.mgr = mgr = ParameterManager(self)
+        conv_builder = SharedConvBuilder(backend, mgr)
 
-        if self.deep_base:
-            self.resinit = nn.Sequential(OrderedDict([
-                ('conv1', conv_builder(
-                    3, 64, 
-                    kernel_size=3, stride=2, padding=1, bias=False,
-                )),
-                ('bn1', ModuleHelper.BatchNorm2d(bn_type=bn_type)(64)),
-                ('relu1', nn.ReLU(inplace=False)),
-                ('conv2', conv_builder(
-                    64, 64, 
-                    kernel_size=3, stride=1, padding=1, bias=False,
-                )),
-                ('bn2', ModuleHelper.BatchNorm2d(bn_type=bn_type)(64)),
-                ('relu2', nn.ReLU(inplace=False)),
-                ('conv3', conv_builder(
-                    64, 128, 
-                    kernel_size=3, stride=1, padding=1, bias=False
-                )),
-                ('bn3', ModuleHelper.BatchNorm2d(bn_type=bn_type)(self.inplanes)),
-                ('relu3', nn.ReLU(inplace=False))]
-            ))
-        else:
-            # we do not handle the original stem case.
-            self.resinit = nn.Sequential(OrderedDict([
-                ('conv1', conv_builder(3, 64, kernel_size=7, stride=2, padding=3, bias=False)),
-                ('bn1', ModuleHelper.BatchNorm2d(bn_type=bn_type)(self.inplanes)),
-                ('relu1', nn.ReLU(inplace=False))]
-            ))
+        with mgr.new_context():
+            if self.deep_base:
+                self.resinit = nn.Sequential(OrderedDict([
+                    ('conv1', conv_builder(
+                        3, 64, 
+                        kernel_size=3, stride=2, padding=1, bias=False,
+                    )),
+                    ('bn1', ModuleHelper.BatchNorm2d(bn_type=bn_type)(64)),
+                    ('relu1', nn.ReLU(inplace=False)),
+                    ('conv2', conv_builder(
+                        64, 64, 
+                        kernel_size=3, stride=1, padding=1, bias=False,
+                    )),
+                    ('bn2', ModuleHelper.BatchNorm2d(bn_type=bn_type)(64)),
+                    ('relu2', nn.ReLU(inplace=False)),
+                    ('conv3', conv_builder(
+                        64, 128, 
+                        kernel_size=3, stride=1, padding=1, bias=False
+                    )),
+                    ('bn3', ModuleHelper.BatchNorm2d(bn_type=bn_type)(self.inplanes)),
+                    ('relu3', nn.ReLU(inplace=False))]
+                ))
+            else:
+                # we do not handle the original stem case.
+                self.resinit = nn.Sequential(OrderedDict([
+                    ('conv1', conv_builder(3, 64, kernel_size=7, stride=2, padding=3, bias=False)),
+                    ('bn1', ModuleHelper.BatchNorm2d(bn_type=bn_type)(self.inplanes)),
+                    ('relu1', nn.ReLU(inplace=False))]
+                ))
 
-        self.maxpool = nn.MaxPool2d(
-            kernel_size=3, stride=2, padding=1
-        )
+            self.maxpool = nn.MaxPool2d(
+                kernel_size=3, stride=2, padding=1, ceil_mode=False
+            )
 
-        self.layer1 = self._make_layer(conv_builder, block, 64, layers[0], bn_type=bn_type)
-        self.layer2 = self._make_layer(conv_builder, block, 128, layers[1], stride=2, bn_type=bn_type)
-        self.layer3 = self._make_layer(conv_builder, block, 256, layers[2], stride=2, bn_type=bn_type)
-        self.layer4 = self._make_layer(conv_builder, block, 512, layers[3], stride=2, bn_type=bn_type)
-        self.avgpool = nn.AvgPool2d(7, stride=1)
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+            self.layer1 = self._make_layer(conv_builder, block, 64, layers[0], bn_type=bn_type)
+            self.layer2 = self._make_layer(conv_builder, block, 128, layers[1], stride=2, bn_type=bn_type)
+            self.layer3 = self._make_layer(conv_builder, block, 256, layers[2], stride=2, bn_type=bn_type)
+            self.layer4 = self._make_layer(conv_builder, block, 512, layers[3], stride=2, bn_type=bn_type)
+            self.avgpool = nn.AvgPool2d(7, stride=1)
+            self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for name, param in self.named_parameters():
             if 'conv_weight' in name:
@@ -129,30 +131,40 @@ class SharedResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.resinit(x)
-        x = self.maxpool(x)
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        with self.mgr.new_context():
+            x = self.resinit(x)
+            x = self.maxpool(x)
+            x = self.layer1(x)
+            x = self.layer2(x)
+            x = self.layer3(x)
+            x = self.layer4(x)
 
-        x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
+            x = self.avgpool(x)
+            x = x.view(x.size(0), -1)
+            x = self.fc(x)
 
         return x
 
 class SharedResNetModels(object):
 
-    def deepbase_basic_shared_resnet50(self, **kwargs):
-        model = SharedResNet('basic', Bottleneck, [3, 4, 6, 3], deep_base=True,
+    _layer_config = {
+        50: [3, 4, 6, 3],
+        101: [3, 4, 23, 3],
+    }
+
+    def deepbase_shared_resnet(self, backend, depth, **kwargs):
+        model = SharedResNet(backend, Bottleneck, self._layer_config[depth], deep_base=True,
                              bn_type=0, **kwargs)
         return model
 
-    def deepbase_basic_shared_resnet101(self, **kwargs):
-        model = SharedResNet('basic', Bottleneck, [3, 4, 23, 3], deep_base=True,
-                             bn_type=0, **kwargs)
-        return model
+class cls_basic_shared_resnet101:
 
-def get_cls_net(config, **kwargs):
-    return SharedResNetModels().deepbase_basic_shared_resnet101()
+    @staticmethod
+    def get_cls_net(config, **kw):
+        return SharedResNetModels().deepbase_shared_resnet('basic', 101)
+
+class cls_dynamic_shared_resnet101:
+
+    @staticmethod
+    def get_cls_net(config, **kw):
+        return SharedResNetModels().deepbase_shared_resnet('dynamic', 101)
