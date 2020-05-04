@@ -26,6 +26,7 @@ import torchvision.transforms as transforms
 from tensorboardX import SummaryWriter
 
 import _init_paths
+from dataset.ZipFolder import ImageZipFolder
 import models
 from config import config
 from config import update_config
@@ -142,6 +143,7 @@ def main():
     traindir = os.path.join(config.DATASET.ROOT, config.DATASET.TRAIN_SET)
     valdir = os.path.join(config.DATASET.ROOT, config.DATASET.TEST_SET)
     print(config.DATASET.ROOT)
+    '''
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
@@ -174,6 +176,51 @@ def main():
         num_workers=config.WORKERS,
         pin_memory=True
     )
+    '''
+
+    dataset_method = ImageZipFolder if config.DATASET.DATA_FORMAT == 'zip' \
+        else datasets.ImageFolder
+
+    traindir = traindir + '.zip' if config.DATASET.DATA_FORMAT == 'zip' \
+        else traindir
+    valdir = valdir + '.zip' if config.DATASET.DATA_FORMAT == 'zip' \
+        else valdir
+
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+
+    train_dataset = dataset_method(
+        traindir,
+        transforms.Compose([
+            transforms.RandomResizedCrop(config.MODEL.IMAGE_SIZE[0]),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize,
+        ])
+    )
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=config.TRAIN.BATCH_SIZE_PER_GPU*len(gpus),
+        shuffle=True,
+        num_workers=config.WORKERS,
+        pin_memory=True
+    )
+
+    valid_loader = torch.utils.data.DataLoader(
+        dataset_method(valdir, transforms.Compose([
+            transforms.Resize(int(config.MODEL.IMAGE_SIZE[0] / 0.875)),
+            transforms.CenterCrop(config.MODEL.IMAGE_SIZE[0]),
+            transforms.ToTensor(),
+            normalize,
+        ])),
+        batch_size=config.TEST.BATCH_SIZE_PER_GPU*len(gpus),
+        shuffle=False,
+        num_workers=config.WORKERS,
+        pin_memory=True
+    )
+
+
+
     for epoch in range(last_epoch, config.TRAIN.END_EPOCH):
         lr_scheduler.step()
         # train for one epoch
